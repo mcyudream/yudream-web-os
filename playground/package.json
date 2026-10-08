@@ -1,0 +1,26 @@
+{
+  "name": "@yudream/playground",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "vue-tsc -b --noEmit"
+  },
+  "dependencies": {
+    "@yudream/yudream-webos-apps": "workspace:*",
+    "@yudream/yudream-webos-arco": "workspace:*",
+    "@yudream/yudream-webos-shared": "workspace:*",
+    "@yudream/yudream-webos-vue": "workspace:*",
+    "pinia": "catalog:",
+    "vue": "catalog:"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "catalog:",
+    "typescript": "catalog:",
+    "unocss": "catalog:",
+    "vite": "catalog:",
+    "vue-tsc": "catalog:"
+  }
+}

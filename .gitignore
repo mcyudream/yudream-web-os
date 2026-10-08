@@ -1,0 +1,35 @@
+# 文档只提交开发规范与经验库，其余（计划、调研、敏感信息）均不提交
+docs/*
+!docs/dev/
+!docs/exp/
+
+# 参考项目源码（仅本地对照阅读，不提交；注意各自协议传染性）
+reference/
+
+# 环境与密钥
+.env*
+*.pem
+*.key
+
+# 系统与编辑器
+.DS_Store
+.idea/
+.vscode/
+*.code-workspace
+.zcode/
+
+# 构建产物与运行时
+node_modules/
+dist/
+dist-test/
+runtime/
+*.log
+*.tsbuildinfo
+.eslintcache
+.stylelintcache
+
+# 本地测试数据
+data-test/
+*.db
+*.db-shm
+*.db-wal

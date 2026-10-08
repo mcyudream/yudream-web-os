@@ -1,0 +1,56 @@
+{
+  "name": "yudream-webos-monorepo",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@12.6.0",
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @yudream/playground run dev",
+    "build": "pnpm --filter './packages/*' -r run build",
+    "test": "pnpm --filter './packages/*' -r run test",
+    "lint": "run-s lint:tsc lint:eslint lint:stylelint",
+    "lint:tsc": "pnpm --filter './packages/*' -r run lint",
+    "lint:eslint": "eslint . --cache --fix",
+    "lint:stylelint": "stylelint \"{packages,playground}/**/*.{css,scss,vue}\" --cache --fix",
+    "preinstall": "npx only-allow pnpm",
+    "postinstall": "simple-git-hooks",
+    "taze": "taze minor -wIr",
+    "commit": "git cz",
+    "release": "bumpp"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "catalog:",
+    "@iconify-json/lucide": "catalog:",
+    "@stylistic/stylelint-config": "catalog:",
+    "@types/node": "catalog:",
+    "@unocss/eslint-plugin": "catalog:",
+    "bumpp": "catalog:",
+    "cz-git": "catalog:",
+    "eslint": "catalog:",
+    "lint-staged": "catalog:",
+    "npm-run-all2": "catalog:",
+    "simple-git-hooks": "catalog:",
+    "stylelint": "catalog:",
+    "stylelint-config-recess-order": "catalog:",
+    "stylelint-config-standard-scss": "catalog:",
+    "stylelint-config-standard-vue": "catalog:",
+    "stylelint-scss": "catalog:",
+    "taze": "catalog:",
+    "typescript": "catalog:",
+    "unocss": "catalog:",
+    "unocss-preset-animations": "catalog:",
+    "vite-plugin-lib-inject-css": "catalog:"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "pnpm lint-staged",
+    "preserveUnused": true
+  },
+  "config": {
+    "commitizen": {
+      "path": "node_modules/cz-git"
+    }
+  }
+}
