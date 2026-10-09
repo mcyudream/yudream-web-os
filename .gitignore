@@ -33,3 +33,8 @@ data-test/
 *.db
 *.db-shm
 *.db-wal
+
+# 并行流程转译产物（源为 .ts/.vue，构建生成，勿提交）
+packages/**/*.js
+playground/**/*.js
+uno.config.js

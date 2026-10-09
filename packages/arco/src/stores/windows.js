@@ -1,1 +1,0 @@
-export { useWindowsStore } from './compat';
