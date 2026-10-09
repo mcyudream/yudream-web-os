@@ -1,7 +1,7 @@
 {
   "name": "@yudream/yudream-webos-arco",
   "type": "module",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Arco Design Vue UI layer of YudreamWebOS: all visual components (desktop, windows, dock, launchpad, finder, menubar, widgets)",
   "author": "YuDream",
   "license": "MIT",

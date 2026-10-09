@@ -1,7 +1,7 @@
 {
   "name": "@yudream/yudream-webos-vue",
   "type": "module",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Vue binding layer of YudreamWebOS: WebOSProvider, createWebOS, composables, uiRegistry overrides, slot protocol",
   "author": "YuDream",
   "license": "MIT",

@@ -1,7 +1,7 @@
 {
   "name": "@yudream/yudream-webos-apps",
   "type": "module",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Built-in apps of YudreamWebOS: finder, settings, browser, launchpad, terminal, notes, text-editor, image-viewer, calculator, app-store",
   "author": "YuDream",
   "license": "MIT",

@@ -1,0 +1,394 @@
+import { shortId } from '@yudream/yudream-webos-shared';
+const spanOf = (item) => item.span ?? { w: 1, h: 1 };
+/**
+ * 桌面布局模型：grid/free 两种排布、swap/shift 换位策略、文件夹（含多格卡片）、排序整理。
+ * 多桌面（Spaces）预留：首版单 space。
+ *
+ * 多格与遮挡：blockedCells 是「被小组件等其它层占据的格子」（UI 层换算后注入），
+ * 落点/换位/整理一律视其为已占用——图标永远不会落在小组件底下。
+ */
+export class DesktopModel {
+    items = new Map();
+    listeners = new Set();
+    arrangeMode = 'grid';
+    grid = { cellWidth: 84, cellHeight: 92, gap: 4, direction: 'rtl' };
+    collision = 'swap';
+    /** 每列最大行数（由 ui 层按视口高度计算）；0 = 不限（一列到底） */
+    rowsPerColumn = 0;
+    /** 被其它层（小组件）占据的格子，键 "col,row"（模型坐标） */
+    blockedCells = new Set();
+    constructor(items) {
+        for (const item of items ?? []) {
+            this.items.set(item.id, item);
+        }
+    }
+    list() {
+        return [...this.items.values()];
+    }
+    get(id) {
+        return this.items.get(id);
+    }
+    onChange(fn) {
+        this.listeners.add(fn);
+        return () => this.listeners.delete(fn);
+    }
+    /** 项占据的矩形（模型坐标） */
+    rectOf(item) {
+        const s = spanOf(item);
+        return { col: item.position.col, row: item.position.row, w: s.w, h: s.h };
+    }
+    rectsOverlap(a, b) {
+        return a.col < b.col + b.w && b.col < a.col + a.w && a.row < b.row + b.h && b.row < a.row + a.h;
+    }
+    /** 目标矩形是否撞上任何其它项（含多格）或被遮挡格 */
+    collides(rect, excludeId) {
+        for (let c = rect.col; c < rect.col + rect.w; c++) {
+            for (let r = rect.row; r < rect.row + rect.h; r++) {
+                if (this.blockedCells.has(`${c},${r}`)) {
+                    return 'blocked';
+                }
+            }
+        }
+        for (const x of this.items.values()) {
+            if (x.id === excludeId) {
+                continue;
+            }
+            if (this.rectsOverlap(rect, this.rectOf(x))) {
+                return x;
+            }
+        }
+        return null;
+    }
+    add(item) {
+        const withId = { ...item, id: item.id ?? shortId('desk') };
+        if (this.arrangeMode === 'grid') {
+            const s = spanOf(withId);
+            const pos = withId.position;
+            const rect = pos
+                ? { col: pos.col, row: pos.row, w: s.w, h: s.h }
+                : { col: 0, row: 0, w: s.w, h: s.h };
+            const hit = this.collides(rect, withId.id);
+            if (!pos || hit) {
+                withId.position = this.firstFreeCell(pos ?? { col: 0, row: 0 }, s);
+            }
+        }
+        this.items.set(withId.id, withId);
+        this.notify('add');
+        return withId;
+    }
+    remove(id) {
+        if (this.items.delete(id)) {
+            this.notify('remove');
+        }
+    }
+    moveTo(id, pos) {
+        const item = this.items.get(id);
+        if (!item) {
+            return { ok: false };
+        }
+        if (this.arrangeMode === 'free') {
+            item.position = pos;
+            this.notify('move');
+            return { ok: true };
+        }
+        const target = pos;
+        // 小组件：挤开所有占位者（含其它小组件——卡片实际占格，不允许重叠）
+        if (item.type === 'widget') {
+            const rect = this.rectOf({ ...item, position: target });
+            for (let c = rect.col; c < rect.col + rect.w; c++) {
+                for (let r = rect.row; r < rect.row + rect.h; r++) {
+                    if (this.blockedCells.has(`${c},${r}`)) {
+                        item.position = this.firstFreeCell(target, spanOf(item));
+                        this.notify('move');
+                        return { ok: true };
+                    }
+                }
+            }
+            for (const x of this.list()) {
+                if (x.id === id) {
+                    continue;
+                }
+                if (this.rectsOverlap(this.rectOf(x), rect)) {
+                    x.position = this.firstFreeCell({ col: 0, row: 0 }, spanOf(x));
+                }
+            }
+            item.position = { ...target };
+            this.notify('move');
+            return { ok: true };
+        }
+        // 目标矩形被文件夹占据 → 不移动，交由 UI 解释为「拖入文件夹」
+        const hit = this.collides(this.rectOf({ ...item, position: target }), id);
+        if (hit && hit !== 'blocked' && hit.type === 'folder') {
+            return { ok: false, folderId: hit.id };
+        }
+        if (hit) {
+            const s = spanOf(item);
+            const occupant = hit;
+            if (this.collision === 'shift') {
+                // shift：目标起整体顺移（仅 1x1 项参与顺移）
+                this.shiftFrom(target, id);
+                item.position = { ...target };
+                this.notify('move');
+                return { ok: true };
+            }
+            // swap：1x1 对 1x1 才换位；跨格项撞其它项 → 找最近空位
+            if (s.w === 1 && s.h === 1 && spanOf(occupant).w === 1 && spanOf(occupant).h === 1) {
+                const origin = item.position;
+                occupant.position = { ...origin };
+                item.position = { ...target };
+                this.notify('move');
+                return { ok: true, swappedWith: occupant.id };
+            }
+            item.position = this.firstFreeCell(target, s);
+            this.notify('move');
+            return { ok: true };
+        }
+        // 同位移动不通知（避免双击时 pointerup 触发无谓重建，吞掉 dblclick）
+        if (item.position.col === target.col && item.position.row === target.row) {
+            return { ok: true };
+        }
+        item.position = { ...target };
+        this.notify('move');
+        return { ok: true };
+    }
+    /** 改变项的跨度（文件夹卡片 / 大图标）。rtl 固定视觉左缘；撞其它图标 → 挤开；撞小组件占格 → 本项自动挪到最近可用位置。永不拒绝 */
+    resizeItem(id, span) {
+        const item = this.items.get(id);
+        if (!item) {
+            return { ok: false };
+        }
+        const blockedHit = (rect) => {
+            for (let c = rect.col; c < rect.col + rect.w; c++) {
+                for (let r = rect.row; r < rect.row + rect.h; r++) {
+                    if (this.blockedCells.has(`${c},${r}`)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+        const oldSpan = spanOf(item);
+        let pos = { ...item.position };
+        // rtl（从右起排）：优先固定视觉左缘向视觉右扩（基列左移，最多扩到 col 0）；
+        // 右缘已无空间（项贴屏幕最右）→ 改为右缘不动、向视觉左扩（col 不变），请求的跨度始终生效
+        if (this.grid.direction === 'rtl' && span.w !== oldSpan.w) {
+            const maxRight = oldSpan.w + pos.col;
+            if (span.w <= maxRight) {
+                pos = { ...pos, col: pos.col + oldSpan.w - span.w };
+            }
+            // else：col 不动，向左长
+        }
+        let rect = { col: pos.col, row: pos.row, w: span.w, h: span.h };
+        // 目标区域压到小组件 → 本项挪到最近能放下 span 的空位
+        if (blockedHit(rect)) {
+            pos = this.firstFreeCell(pos, span);
+            rect = { col: pos.col, row: pos.row, w: span.w, h: span.h };
+        }
+        // 挡路的图标逐个迁到空位
+        for (const x of this.list()) {
+            if (x.id === id) {
+                continue;
+            }
+            if (this.rectsOverlap(this.rectOf(x), rect)) {
+                x.position = this.firstFreeCell({ col: 0, row: 0 }, spanOf(x));
+            }
+        }
+        item.position = pos;
+        item.span = span;
+        this.notify('move');
+        return { ok: true };
+    }
+    /** 拖 A 到 B 成组（文件夹）：子项以快照存入 folder.children */
+    createFolder(name, childIds) {
+        const children = [];
+        let anchor = { col: 0, row: 0 };
+        for (const id of childIds) {
+            const child = this.items.get(id);
+            if (!child) {
+                continue;
+            }
+            anchor = child.position;
+            children.push({ ...child });
+            this.items.delete(id);
+        }
+        const folder = this.add({ type: 'folder', refId: '', name, position: anchor, children });
+        this.notify('folder');
+        return folder;
+    }
+    dissolveFolder(id) {
+        const folder = this.items.get(id);
+        if (folder?.type === 'folder') {
+            // 子项快照放回桌面（空位自动避让）
+            for (const child of folder.children ?? []) {
+                this.addToGrid(child);
+            }
+            this.items.delete(id);
+            this.notify('folder');
+        }
+    }
+    folderChildren(id) {
+        const folder = this.items.get(id);
+        if (folder?.type !== 'folder') {
+            return [];
+        }
+        return (folder.children ?? []).map(c => ({ ...c }));
+    }
+    /** 图标移入文件夹（子项快照存入 children） */
+    addToFolder(folderId, childId) {
+        const folder = this.items.get(folderId);
+        const child = this.items.get(childId);
+        if (!folder || folder.type !== 'folder' || !child || childId === folderId) {
+            return false;
+        }
+        if (child.type === 'folder') {
+            return false; // 文件夹套文件夹：首版不支持
+        }
+        folder.children = folder.children ?? [];
+        if (folder.children.some(c => c.id === childId)) {
+            return false;
+        }
+        folder.children.push({ ...child });
+        this.items.delete(childId);
+        this.notify('folder');
+        return true;
+    }
+    /** 子项移出文件夹：回到桌面网格空位（可指定起点） */
+    removeFromFolder(folderId, childId, start) {
+        const folder = this.items.get(folderId);
+        if (!folder || folder.type !== 'folder') {
+            return false;
+        }
+        const children = folder.children ?? [];
+        const idx = children.findIndex(c => c.id === childId);
+        if (idx < 0) {
+            return false;
+        }
+        const [child] = children.splice(idx, 1);
+        this.addToGrid(child, start);
+        this.notify('folder');
+        return true;
+    }
+    /** 文本文件写内容（随 desktop.layout 持久化） */
+    writeFile(id, content) {
+        const item = this.items.get(id);
+        if (!item) {
+            return false;
+        }
+        item.content = content;
+        this.notify('file');
+        return true;
+    }
+    /** 把游离项放回网格：给定位被占/被遮挡 → 自动找空位 */
+    addToGrid(child, start) {
+        const pos = (start ?? child.position);
+        const s = child.span ?? { w: 1, h: 1 };
+        const rect = pos
+            ? { col: pos.col, row: pos.row, w: s.w, h: s.h }
+            : { col: 0, row: 0, w: s.w, h: s.h };
+        const restored = { ...child, position: this.collides(rect, child.id) ? this.firstFreeCell(pos ?? { col: 0, row: 0 }, s) : (pos ?? { col: 0, row: 0 }) };
+        this.items.set(restored.id, restored);
+    }
+    /** 「整理」排序 */
+    sortBy(criteria) {
+        const items = this.list();
+        items.sort((a, b) => {
+            if (criteria === 'name') {
+                return a.name.localeCompare(b.name, 'zh-CN');
+            }
+            if (criteria === 'kind') {
+                return a.type.localeCompare(b.type) || a.name.localeCompare(b.name, 'zh-CN');
+            }
+            return a.id.localeCompare(b.id);
+        });
+        this.reassignCells(items);
+        this.notify('sort');
+    }
+    /** 「按网格对齐」 */
+    autoArrange() {
+        this.reassignCells(this.list());
+        this.notify('arrange');
+    }
+    /** 网格占用探测：从起点向下找第一个放下 span 且不撞遮挡/他项的空位（列优先，macOS 惯例） */
+    firstFreeCell(start, span = { w: 1, h: 1 }) {
+        const startCol = Math.max(0, start.col);
+        let col = startCol;
+        let row = start.row;
+        for (let guard = 0; guard < 10000; guard++) {
+            if (!this.collides({ col, row, w: span.w, h: span.h })) {
+                return { col, row };
+            }
+            row++;
+            // 列满（超出每列行数）→ 换下一列回到顶部（macOS 列优先排布）
+            if (this.rowsPerColumn > 0 && row >= this.rowsPerColumn) {
+                row = 0;
+                col++;
+            }
+        }
+        return { col: startCol, row: start.row };
+    }
+    /** shift：目标格起，其余项按列优先顺移一格 */
+    shiftFrom(start, excludeId) {
+        const movable = this.list().filter(x => x.id !== excludeId && x.span == null).map(x => ({ x, p: x.position })).sort((a, b) => (a.p.col - b.p.col) || (a.p.row - b.p.row));
+        for (const { x, p } of movable) {
+            // 在目标之后的项整体后移一行
+            if (p.row >= start.row) {
+                ;
+                x.position = { col: p.col, row: p.row + 1 };
+            }
+        }
+    }
+    /** 重排：全部项（含文件夹/多格卡）按列优先放进不撞遮挡与他项的格子 */
+    reassignCells(items) {
+        const next = new Map();
+        const placed = [];
+        // 小组件不参与整理/排序：原位保留，其它项绕开它们排布
+        for (const item of items) {
+            if (item.type === 'widget') {
+                const sp = spanOf(item);
+                const p = item.position;
+                const rect = { col: p.col, row: p.row, w: sp.w, h: sp.h };
+                placed.push(rect);
+                next.set(item.id, item);
+            }
+        }
+        const free = (rect) => {
+            for (let c = rect.col; c < rect.col + rect.w; c++) {
+                for (let r = rect.row; r < rect.row + rect.h; r++) {
+                    if (this.blockedCells.has(`${c},${r}`)) {
+                        return false;
+                    }
+                }
+            }
+            return !placed.some(p => this.rectsOverlap(p, rect));
+        };
+        for (const item of items) {
+            if (item.type === 'widget') {
+                continue;
+            }
+            const s = spanOf(item);
+            let col = 0;
+            let row = 0;
+            let guard = 0;
+            for (; guard < 10000; guard++) {
+                if (free({ col, row, w: s.w, h: s.h })) {
+                    break;
+                }
+                row++;
+                if (this.rowsPerColumn > 0 && row >= this.rowsPerColumn) {
+                    row = 0;
+                    col++;
+                }
+            }
+            if (guard >= 10000) {
+                col = item.position.col;
+                row = item.position.row; // 放不下：原地保留
+            }
+            placed.push({ col, row, w: s.w, h: s.h });
+            next.set(item.id, { ...item, position: { col, row } });
+        }
+        this.items = next;
+    }
+    notify(reason) {
+        this.listeners.forEach(fn => fn(reason));
+    }
+}

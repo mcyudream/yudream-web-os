@@ -1,7 +1,7 @@
 {
   "name": "@yudream/yudream-webos",
   "type": "module",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "YudreamWebOS: standalone WebOS UI library for Vue 3 - theme, windows, desktop, grid tiles, cards, dock, quick launch, launchpad, sandboxed browser",
   "author": "YuDream",
   "license": "MIT",
